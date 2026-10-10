@@ -1,0 +1,19 @@
+{
+    "name": "scriptvortexde/pterodactyl-hytale-hosting-tests",
+    "description": "Test harness for the Hytale Hosting module. Runs the shared core against Laravel with stubbed Pterodactyl models.",
+    "type": "project",
+    "require-dev": {
+        "orchestra/testbench": "^10.0",
+        "phpunit/phpunit": "^11.0"
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "HytaleHosting\\": "../module/src/",
+            "Pterodactyl\\": "Stubs/",
+            "HytaleHosting\\Tests\\": "Feature/"
+        }
+    },
+    "config": {
+        "allow-plugins": false
+    }
+}

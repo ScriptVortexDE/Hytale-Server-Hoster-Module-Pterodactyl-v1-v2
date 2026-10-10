@@ -1,0 +1,165 @@
+{
+    "_comment": "DO NOT EDIT: FILE GENERATED AUTOMATICALLY BY PTERODACTYL PANEL - PTERODACTYL.IO",
+    "meta": {
+        "version": "PTDL_v2",
+        "update_url": null
+    },
+    "exported_at": "2026-10-10T00:00:00+00:00",
+    "name": "Hytale (Provider Auth)",
+    "author": "hytale-hosting@example.com",
+    "description": "Hytale dedicated server with automatic provider authentication through the Hytale Hosting module's session broker. Uses shared, read-only game files from the node when the Hytale mount is attached.",
+    "features": [
+        "java_version",
+        "pid_limit"
+    ],
+    "docker_images": {
+        "Java 25": "ghcr.io/pterodactyl/yolks:java_25"
+    },
+    "file_denylist": [],
+    "startup": "if [ -f /mnt/hytale/bin/hytale-start.sh ]; then exec /bin/bash /mnt/hytale/bin/hytale-start.sh; else exec /bin/bash ./hytale-start.sh; fi",
+    "config": {
+        "files": "{}",
+        "startup": "{\n    \"done\": \"Hytale Server Booted!\"\n}",
+        "logs": "{}",
+        "stop": "stop"
+    },
+    "scripts": {
+        "installation": {
+            "script": "#!/bin/bash\n# Hytale installation script (Hytale Hosting module).\n# Runs in ghcr.io/pterodactyl/installers:debian with the server files at /mnt/server.\nset -euo pipefail\n\nSERVER_DIR=/mnt/server\nFILES_SOURCE=\"${HYTALE_FILES_SOURCE:-auto}\"\nDOWNLOADER_URL=\"https://downloader.hytale.com/hytale-downloader.zip\"\n\nlog() { printf '[install] %s\\n' \"$*\"; }\n\nmkdir -p \"$SERVER_DIR\" \"$SERVER_DIR/mods\" \"$SERVER_DIR/logs\"\ncd \"$SERVER_DIR\"\n\nif [ \"$FILES_SOURCE\" = \"local\" ]; then\n    case \"$(uname -m)\" in\n        x86_64|amd64) BINARY=hytale-downloader-linux-amd64 ;;\n        *) log \"The Hytale Downloader has no build for $(uname -m). Use the shared node mount instead.\"; exit 1 ;;\n    esac\n\n    WORK=\"$(mktemp -d)\"\n    trap 'rm -rf \"$WORK\"' EXIT\n\n    log \"Downloading the official Hytale Downloader...\"\n    curl -fsSL --proto '=https' \"$DOWNLOADER_URL\" -o \"$WORK/downloader.zip\"\n    unzip -p \"$WORK/downloader.zip\" \"$BINARY\" >\"$WORK/hytale-downloader\"\n    chmod 0700 \"$WORK/hytale-downloader\"\n\n    # Credentials stay with this server (its owner's own Hytale account).\n    mkdir -p \"$SERVER_DIR/.hytale-downloader\"\n    chmod 0700 \"$SERVER_DIR/.hytale-downloader\"\n    export HOME=\"$SERVER_DIR/.hytale-downloader\"\n\n    ARGS=(-download-path \"$WORK/game.zip\" -skip-update-check)\n    if [ -n \"${HYTALE_PATCHLINE:-}\" ] && [ \"${HYTALE_PATCHLINE}\" != \"release\" ]; then\n        ARGS+=(-patchline \"$HYTALE_PATCHLINE\")\n    fi\n\n    log \"Starting the download. On the first install, open the URL below and enter the code\"\n    log \"to sign in with a Hytale account that owns the game.\"\n    (cd \"$HOME\" && \"$WORK/hytale-downloader\" \"${ARGS[@]}\")\n\n    [ -f \"$WORK/game.zip\" ] || { log \"The download did not produce a game package.\"; exit 1; }\n\n    log \"Extracting server files...\"\n    rm -rf \"$SERVER_DIR/Server\"\n    unzip -q -o \"$WORK/game.zip\" 'Server/*' 'Assets.zip' -d \"$SERVER_DIR\"\n    [ -f \"$SERVER_DIR/Server/HytaleServer.jar\" ] && [ -f \"$SERVER_DIR/Assets.zip\" ] || { log \"The game package is incomplete.\"; exit 1; }\n\n    (cd \"$HOME\" && \"$WORK/hytale-downloader\" -print-version -skip-update-check 2>/dev/null | tail -n1 >\"$SERVER_DIR/.hytale-version\") || true\nelse\n    log \"Game files are provided by the node-wide Hytale mount (/mnt/hytale).\"\nfi\n\nlog \"Installing the launcher...\"\ncat >\"$SERVER_DIR/hytale-start.sh\" <<'HYTALE_START_SH'\n#!/bin/bash\n# Hytale launcher for Pterodactyl (Hytale Hosting module).\n#\n# 1. Finds the game files: the node-wide read-only mount (/mnt/hytale/current)\n#    or a local copy in /home/container.\n# 2. Fetches a game session from the Panel's session broker using this server's\n#    own broker token and passes it to the server through the environment\n#    variables documented in Hytale's Server Provider Authentication Guide.\n# 3. Starts the server with Java.\n#\n# Tokens are never written to disk or put on a command line.\n\nset -uo pipefail\numask 077\n\nlog() { printf '[hytale] %s\\n' \"$*\"; }\ndie() { printf '[hytale] ERROR: %s\\n' \"$*\" >&2; exit 1; }\nis_true() { case \"${1:-}\" in 1|true|TRUE|yes|on) return 0 ;; *) return 1 ;; esac; }\n\ncd /home/container || die \"/home/container is missing.\"\n\n# --- Game files ---------------------------------------------------------------\n\nFILES_SOURCE=\"${HYTALE_FILES_SOURCE:-auto}\"\nMOUNT_DIR=\"${HYTALE_MOUNT_DIR:-/mnt/hytale}\"\nGAME_DIR=\"\"\n\nif [ \"$FILES_SOURCE\" != \"local\" ] && [ -f \"$MOUNT_DIR/current/Server/HytaleServer.jar\" ] && [ -f \"$MOUNT_DIR/current/Assets.zip\" ]; then\n    GAME_DIR=\"$MOUNT_DIR/current\"\n    log \"Using shared game files $(cat \"$MOUNT_DIR/current/VERSION\" 2>/dev/null || echo '') from the node.\"\nelif [ \"$FILES_SOURCE\" != \"mount\" ] && [ -f ./Server/HytaleServer.jar ] && [ -f ./Assets.zip ]; then\n    GAME_DIR=\"/home/container\"\n    log \"Using local game files $(cat ./.hytale-version 2>/dev/null || echo '').\"\nelif [ \"$FILES_SOURCE\" = \"mount\" ]; then\n    die \"The shared Hytale files are not mounted at $MOUNT_DIR. Ask your provider to attach the Hytale mount to this server.\"\nelse\n    die \"No Hytale server files found. Reinstall the server or ask your provider to attach the Hytale mount.\"\nfi\n\nSERVER_JAR=\"$GAME_DIR/Server/HytaleServer.jar\"\nASSETS_ZIP=\"$GAME_DIR/Assets.zip\"\nAOT_CACHE=\"$GAME_DIR/Server/HytaleServer.aot\"\n\nEXTRA_SERVER=()\nif [ -n \"${EXTRA_SERVER_ARGS:-}\" ]; then\n    read -r -a EXTRA_SERVER <<<\"$EXTRA_SERVER_ARGS\"\n    for argument in \"${EXTRA_SERVER[@]}\"; do\n        case \"$argument\" in\n            --auth-mode*|--session-token*|--identity-token*|--bind*|--assets*)\n                die \"The server argument '${argument%%=*}' is managed by your provider and cannot be overridden.\" ;;\n        esac\n    done\nfi\n\n# --- Session tokens -----------------------------------------------------------\n\nTOKEN_PATTERN='^[A-Za-z0-9._~+/=:-]{1,8192}$'\n\nfetch_session() {\n    local url=\"${HYTALE_BROKER_URL:-}\" token=\"${HYTALE_BROKER_TOKEN:-}\" uuid=\"${P_SERVER_UUID:-}\"\n\n    if [ -z \"$url\" ] || [ -z \"$token\" ] || [ -z \"$uuid\" ]; then\n        log \"The session broker is not configured for this server yet.\"\n        return 1\n    fi\n    case \"$url\" in\n        https://*) ;;\n        http://*) log \"WARNING: The session broker URL does not use HTTPS.\" ;;\n        *) log \"The session broker URL is invalid.\"; return 1 ;;\n    esac\n\n    local headers response code attempt=1 delay=5\n    headers=\"$(mktemp)\" && response=\"$(mktemp)\" || return 1\n    # The bearer token goes through a 0600 file instead of curl's command line.\n    printf 'Authorization: Bearer %s\\nX-Hytale-Server: %s\\n' \"$token\" \"$uuid\" >\"$headers\"\n\n    while :; do\n        : >\"$response\"\n        code=\"$(curl -sS --proto '=https,http' --max-time 20 --connect-timeout 10 \\\n            -X POST -H @\"$headers\" -o \"$response\" -w '%{http_code}' \"$url\" 2>/dev/null || true)\"\n\n        if [ \"$code\" = \"200\" ]; then\n            break\n        fi\n\n        sed -n 's/^ERROR=//p' \"$response\" | head -n1 | while IFS= read -r message; do log \"Session broker: $message\"; done\n        case \"$code\" in\n            429|500|502|503|504|000)\n                if [ \"$attempt\" -ge 5 ]; then\n                    break\n                fi\n                log \"Session broker unavailable (HTTP $code), retrying in ${delay}s ($attempt/5)...\"\n                sleep \"$delay\"\n                attempt=$((attempt + 1))\n                delay=$((delay * 2))\n                ;;\n            *) break ;;\n        esac\n    done\n\n    rm -f \"$headers\"\n\n    if [ \"$code\" != \"200\" ]; then\n        rm -f \"$response\"\n        return 1\n    fi\n\n    local key value session=\"\" identity=\"\" expires=\"\"\n    while IFS='=' read -r key value; do\n        [[ \"$value\" =~ $TOKEN_PATTERN ]] || continue\n        case \"$key\" in\n            HYTALE_SERVER_SESSION_TOKEN) session=\"$value\" ;;\n            HYTALE_SERVER_IDENTITY_TOKEN) identity=\"$value\" ;;\n            HYTALE_SESSION_EXPIRES_AT) expires=\"$value\" ;;\n        esac\n    done <\"$response\"\n    rm -f \"$response\"\n\n    if [ -z \"$session\" ] || [ -z \"$identity\" ]; then\n        log \"The session broker returned an incomplete response.\"\n        return 1\n    fi\n\n    export HYTALE_SERVER_SESSION_TOKEN=\"$session\"\n    export HYTALE_SERVER_IDENTITY_TOKEN=\"$identity\"\n    log \"Game session received${expires:+ (valid until $expires, refreshed automatically by the server)}.\"\n    return 0\n}\n\n# The broker token is only needed for the request above; keep it away from the\n# Java process and any mod running in it.\nif fetch_session; then\n    :\nelif is_true \"${HYTALE_REQUIRE_BROKER:-0}\"; then\n    unset HYTALE_BROKER_TOKEN\n    die \"Could not get a game session from the provider. Try again in a few minutes or contact support.\"\nelse\n    log \"Starting without provider authentication. Players cannot join until the server is authenticated;\"\n    log \"you can authenticate it with your own Hytale account by typing: /auth login device\"\nfi\nunset HYTALE_BROKER_TOKEN\n\n# --- Java command -------------------------------------------------------------\n\nRAM_PERCENT=\"${JAVA_RAM_PERCENT:-85}\"\n[[ \"$RAM_PERCENT\" =~ ^[0-9]{2}$ ]] || RAM_PERCENT=85\n\nJAVA_ARGS=(-Xms128M \"-XX:MaxRAMPercentage=${RAM_PERCENT}\" -Dterminal.jline=false -Dterminal.ansi=true)\n\nif is_true \"${USE_AOT_CACHE:-1}\" && [ -f \"$AOT_CACHE\" ]; then\n    JAVA_ARGS+=(\"-XX:AOTCache=${AOT_CACHE}\")\nfi\n\nif [ -n \"${EXTRA_JVM_ARGS:-}\" ]; then\n    read -r -a EXTRA_JVM <<<\"$EXTRA_JVM_ARGS\"\n    JAVA_ARGS+=(\"${EXTRA_JVM[@]}\")\nfi\n\nSERVER_ARGS=(--assets \"$ASSETS_ZIP\" --bind \"0.0.0.0:${SERVER_PORT:-5520}\" --auth-mode authenticated)\n\nif is_true \"${ENABLE_BACKUPS:-0}\"; then\n    mkdir -p backups\n    SERVER_ARGS+=(--backup --backup-dir backups)\n    [[ \"${BACKUP_FREQUENCY:-}\" =~ ^[0-9]+$ ]] && SERVER_ARGS+=(--backup-frequency \"$BACKUP_FREQUENCY\")\nfi\nis_true \"${DISABLE_SENTRY:-0}\" && SERVER_ARGS+=(--disable-sentry)\nis_true \"${ACCEPT_EARLY_PLUGINS:-0}\" && SERVER_ARGS+=(--accept-early-plugins)\n\n[ \"${#EXTRA_SERVER[@]}\" -gt 0 ] && SERVER_ARGS+=(\"${EXTRA_SERVER[@]}\")\n\nlog \"Starting Hytale server on port ${SERVER_PORT:-5520}/udp.\"\nexec java \"${JAVA_ARGS[@]}\" -jar \"$SERVER_JAR\" \"${SERVER_ARGS[@]}\"\nHYTALE_START_SH\nchmod 0750 \"$SERVER_DIR/hytale-start.sh\"\n\nlog \"Installation complete.\"\n",
+            "container": "ghcr.io/pterodactyl/installers:debian",
+            "entrypoint": "bash"
+        }
+    },
+    "variables": [
+        {
+            "name": "Game Files Source",
+            "description": "Where the server files come from. \"auto\" uses the shared node mount when it is attached and falls back to a local copy. \"local\" downloads the files into this server on install (requires signing in to the Hytale Downloader during installation).",
+            "env_variable": "HYTALE_FILES_SOURCE",
+            "default_value": "auto",
+            "user_viewable": true,
+            "user_editable": false,
+            "rules": "required|string|in:auto,mount,local",
+            "field_type": "text"
+        },
+        {
+            "name": "Patchline",
+            "description": "Release channel for local downloads: release or pre-release.",
+            "env_variable": "HYTALE_PATCHLINE",
+            "default_value": "release",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|string|in:release,pre-release",
+            "field_type": "text"
+        },
+        {
+            "name": "Java Memory Percentage",
+            "description": "Share of the server's memory limit the Java heap may use (50-95). Keep headroom for native memory.",
+            "env_variable": "JAVA_RAM_PERCENT",
+            "default_value": "85",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|integer|between:50,95",
+            "field_type": "text"
+        },
+        {
+            "name": "Use AOT Cache",
+            "description": "Start faster with the AOT cache shipped with the server (1 = on, 0 = off).",
+            "env_variable": "USE_AOT_CACHE",
+            "default_value": "1",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|boolean",
+            "field_type": "text"
+        },
+        {
+            "name": "Enable World Backups",
+            "description": "Let the Hytale server create periodic world backups in ./backups (1 = on, 0 = off).",
+            "env_variable": "ENABLE_BACKUPS",
+            "default_value": "0",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|boolean",
+            "field_type": "text"
+        },
+        {
+            "name": "Backup Frequency",
+            "description": "Minutes between world backups.",
+            "env_variable": "BACKUP_FREQUENCY",
+            "default_value": "30",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|integer|between:5,1440",
+            "field_type": "text"
+        },
+        {
+            "name": "Disable Sentry",
+            "description": "Do not send crash reports to Hytale (1 = disabled).",
+            "env_variable": "DISABLE_SENTRY",
+            "default_value": "0",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|boolean",
+            "field_type": "text"
+        },
+        {
+            "name": "Accept Early Plugins",
+            "description": "Allow early plugins to load (1 = allow).",
+            "env_variable": "ACCEPT_EARLY_PLUGINS",
+            "default_value": "0",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|boolean",
+            "field_type": "text"
+        },
+        {
+            "name": "Extra JVM Arguments",
+            "description": "Additional Java arguments, separated by spaces.",
+            "env_variable": "EXTRA_JVM_ARGS",
+            "default_value": "",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "nullable|string|max:512",
+            "field_type": "text"
+        },
+        {
+            "name": "Extra Server Arguments",
+            "description": "Additional HytaleServer.jar arguments. Authentication, bind address and assets are managed by the provider.",
+            "env_variable": "EXTRA_SERVER_ARGS",
+            "default_value": "",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "nullable|string|max:512",
+            "field_type": "text"
+        },
+        {
+            "name": "Require Provider Session",
+            "description": "Refuse to start when the session broker cannot provide a game session (1) instead of starting unauthenticated (0).",
+            "env_variable": "HYTALE_REQUIRE_BROKER",
+            "default_value": "0",
+            "user_viewable": false,
+            "user_editable": false,
+            "rules": "required|boolean",
+            "field_type": "text"
+        },
+        {
+            "name": "Session Broker URL",
+            "description": "Managed by the Hytale Hosting module. Do not edit.",
+            "env_variable": "HYTALE_BROKER_URL",
+            "default_value": "",
+            "user_viewable": false,
+            "user_editable": false,
+            "rules": "nullable|string|max:255",
+            "field_type": "text"
+        },
+        {
+            "name": "Session Broker Token",
+            "description": "Per-server secret managed by the Hytale Hosting module. Do not edit or share.",
+            "env_variable": "HYTALE_BROKER_TOKEN",
+            "default_value": "",
+            "user_viewable": false,
+            "user_editable": false,
+            "rules": "nullable|string|max:64",
+            "field_type": "text"
+        }
+    ]
+}

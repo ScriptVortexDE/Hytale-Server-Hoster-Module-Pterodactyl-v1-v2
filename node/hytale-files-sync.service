@@ -1,0 +1,13 @@
+[Unit]
+Description=Sync the shared Hytale server files for Pterodactyl
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/hytale-files-sync.sh
+Nice=10
+IOSchedulingClass=idle
+PrivateTmp=true
+ProtectHome=true
+NoNewPrivileges=true
