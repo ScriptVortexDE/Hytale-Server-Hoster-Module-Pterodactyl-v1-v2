@@ -1,0 +1,19 @@
+{
+    "id": "hytale-hosting",
+    "name": "Hytale Hosting",
+    "version": "1.0.0",
+    "description": "Provider authentication and a session token broker for Hytale servers.",
+    "author": "ScriptVortexDE",
+    "icon": "shield-check",
+    "requires": {
+        "panel": "^2.0.0-dev",
+        "php": "^8.3"
+    },
+    "provider": "HytaleHosting\\V2\\HytaleHostingExtensionProvider",
+    "autoload": {
+        "HytaleHosting\\": "src"
+    },
+    "routes": {
+        "root": ["hytale-broker"]
+    }
+}

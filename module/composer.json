@@ -1,0 +1,21 @@
+{
+    "name": "scriptvortexde/pterodactyl-hytale-hosting",
+    "description": "Hytale provider authentication and session token broker for Pterodactyl Panel 1.x (Panel 2.0 uses extension.json).",
+    "type": "library",
+    "version": "1.0.0",
+    "require": {
+        "php": "^8.2"
+    },
+    "autoload": {
+        "psr-4": {
+            "HytaleHosting\\": "src/"
+        }
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "HytaleHosting\\V1\\HytaleHostingServiceProvider"
+            ]
+        }
+    }
+}
